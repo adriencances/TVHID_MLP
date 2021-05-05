@@ -23,21 +23,8 @@ class TVHIDPairs(data.Dataset):
         self.alpha = 0.1
 
         self.phase = phase
-        self.frames_dir = "/home/acances/Data/TVHID/keyframes"
-        self.tracks_dir = "/home/acances/Data/TVHID/tracks"
-        self.pairs_dir = "/home/acances/Data/TVHID/pairs16"
+        self.features_dir = "/home/acances/Data/TVHID/features16"
 
-        self.frame_processor = FrameProcessor(self.w, self.h, self.alpha, self.frames_dir, self.tracks_dir)
-
-        self.class_indices = {
-            "negative": 0,
-            "handShake": 1,
-            "highFive": 2,
-            "hug": 3,
-            "kiss": 4
-        }
-
-        random.seed(seed)
         self.gather_video_ids()
         self.gather_positive_pairs()
         self.gather_negative_pairs()
@@ -54,31 +41,23 @@ class TVHIDPairs(data.Dataset):
     def gather_positive_pairs(self):
         print("Gathering positive pairs")
         self.positive_pairs = []
-        pairs_files = glob.glob("{}/positive/*".format(self.pairs_dir))
-        for file in tqdm.tqdm(pairs_files):
-            video_id = file.split("/")[-1].split(".")[0][6:]
+        features_subdirs = glob.glob("{}/positive/*".format(self.features_dir))
+        for subdir in tqdm.tqdm(features_subdirs):
+            video_id = subdir.split("/")[-1]
             if video_id not in self.video_ids:
                 continue
-            class_name = file.split("/")[-1].split("_")[1]
-            class_index = self.class_indices[class_name]
-            with open(file, "r") as f:
-                for line in f:
-                    pair = line.strip().split(",")
-                    self.positive_pairs.append(pair + [class_index])
+            self.positive_pairs += sorted(glob.glob("{}/*".format(subdir)))
         random.shuffle(self.positive_pairs)
     
     def gather_negative_pairs(self):
         print("Gathering negative pairs")
         self.negative_pairs = []
-        pairs_files = glob.glob("{}/negative/*".format(self.pairs_dir))
-        for file in tqdm.tqdm(pairs_files):
-            video_id = file.split("/")[-1].split(".")[0][6:]
+        features_subdirs = glob.glob("{}/negative/*".format(self.features_dir))
+        for subdir in tqdm.tqdm(features_subdirs):
+            video_id = subdir.split("/")[-1]
             if video_id not in self.video_ids:
                 continue
-            with open(file, "r") as f:
-                for line in f:
-                    pair = line.strip().split(",")
-                    self.negative_pairs.append(pair + [0])
+            self.negative_pairs += sorted(glob.glob("{}/*".format(subdir)))
         random.shuffle(self.negative_pairs)
     
     def create_data(self):
@@ -90,16 +69,11 @@ class TVHIDPairs(data.Dataset):
         "Generates one sample of data"
         nb_pairs = len(self.data)
         assert index < nb_pairs
-        pair = self.data[index]
-        video_id1, track_id1, begin1, end1, video_id2, track_id2, begin2, end2, label = pair
-
-        track_id1, begin1, end1 = list(map(int, [track_id1, begin1, end1]))
-        track_id2, begin2, end2 = list(map(int, [track_id2, begin2, end2]))
-        assert end1 - begin1 == end2 - begin2
-
-        tensor1 = self.frame_processor.processed_frames(video_id1, track_id1, begin1, end1)
-        tensor2 = self.frame_processor.processed_frames(video_id2, track_id2, begin2, end2)
+        features_file = self.data[index]
         
+        with open(features_file, "rb") as f:
+            tensor1, tensor2, label = pickle.load(f)
+
         return tensor1, tensor2, label
 
     def __len__(self):
@@ -108,10 +82,6 @@ class TVHIDPairs(data.Dataset):
 
 
 if __name__ == "__main__":
-    dataset = TVHID("train")
-    # print(len(dataset))
-    # tensor1, tensor2, label = dataset[0]
-    # print(tensor1.shape)
-    # print(tensor2.shape)
+    dataset = TVHIDPairs("train")
 
 
