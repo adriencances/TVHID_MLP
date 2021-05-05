@@ -38,15 +38,27 @@ class TVHIDPairs(data.Dataset):
         }
 
         random.seed(seed)
+        self.gather_video_ids()
         self.gather_positive_pairs()
         self.gather_negative_pairs()
         self.create_data()
+    
+    def gather_video_ids(self):
+        self.video_ids = []
+        video_ids_file = "/home/acances/Data/TVHID/split/{}.txt".format(self.phase)
+        with open(video_ids_file, "r") as f:
+            for line in f:
+                video_id = line.strip()
+                self.video_ids.append(video_id)
 
     def gather_positive_pairs(self):
         print("Gathering positive pairs")
         self.positive_pairs = []
         pairs_files = glob.glob("{}/positive/*".format(self.pairs_dir))
         for file in tqdm.tqdm(pairs_files):
+            video_id = file.split("/")[-1].split(".")[0][6:]
+            if video_id not in self.video_ids:
+                continue
             class_name = file.split("/")[-1].split("_")[1]
             class_index = self.class_indices[class_name]
             with open(file, "r") as f:
@@ -60,6 +72,9 @@ class TVHIDPairs(data.Dataset):
         self.negative_pairs = []
         pairs_files = glob.glob("{}/negative/*".format(self.pairs_dir))
         for file in tqdm.tqdm(pairs_files):
+            video_id = file.split("/")[-1].split(".")[0][6:]
+            if video_id not in self.video_ids:
+                continue
             with open(file, "r") as f:
                 for line in f:
                     pair = line.strip().split(",")
