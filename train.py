@@ -18,26 +18,31 @@ from torch.utils.tensorboard import SummaryWriter
 from dataset_aux import FrameProcessor
 from dataset import TVHIDPairs
 from MLP import ClassificationMLP
+from accuracy import multi_class_accuracy
+
+
+def dummy_loss(out, target):
+    target = (target == 0).long()
+    return F.cross_entropy(out, target)
 
 
 def train_epoch(dataloader_train, model, epoch, loss_fn, optimizer, accuracy_fn):
     nb_batches = 0
     train_loss = 0
     train_acc = 0
-    train_distances = []
 
     model.train()
-    for batch_id, (segment1, segment2, target) in enumerate(tqdm.tqdm(dataloader_train)):
+    for batch_id, (features1, features2, target) in enumerate(dataloader_train):
         # Pass inputs to GPU
-        segment1 = segment1.cuda()
-        segment2 = segment2.cuda()
+        features1 = features1.cuda()
+        features2 = features2.cuda()
         target = target.cuda()
 
         # Pass inputs to the model
-        probs1, probs2 = model(segment1, segment2) # shape : ???
+        out = model(features1, features2) # shape : bx5
 
-        # Compute loss and distances
-        loss, dist = loss_fn(features1_norm, features2_norm, target)
+        # Compute loss
+        loss = loss_fn(out, target)
         train_loss += loss.item()
 
         # Update weights
@@ -45,59 +50,50 @@ def train_epoch(dataloader_train, model, epoch, loss_fn, optimizer, accuracy_fn)
         loss.backward()
         optimizer.step()
 
-        # Compute accuracy and predictions
-        value, preds = accuracy_fn(dist, target)
+        # Compute probabilities, accuracy and predictions
+        probs = F.softmax(out, dim=1)
+        value, preds = accuracy_fn(probs, target)
         train_acc += value
-
-        # Compute distances
-        train_distances += dist.tolist()
 
         nb_batches += 1
 
     train_loss /= nb_batches
     train_acc /= nb_batches
 
-    return train_loss, train_acc, train_distances
+    return train_loss, train_acc
 
 
 def test_epoch(dataloader_val, model, epoch, loss_fn, optimizer, accuracy_fn):
     nb_batches = 0
     val_loss = 0
     val_acc = 0
-    val_distances = []
 
     with torch.no_grad():
         model.eval()
-        for batch_id, (segment1, segment2, target) in enumerate(tqdm.tqdm(dataloader_val)):
+        for batch_id, (features1, features2, target) in enumerate(dataloader_val):
             # Pass inputs to GPU
-            segment1 = segment1.cuda()
-            segment2 = segment2.cuda()
+            features1 = features1.cuda()
+            features2 = features2.cuda()
             target = target.cuda()
 
             # Pass inputs to the model
-            features1, features2 = model(segment1, segment2) # shape : bx1024
+            out = model(features1, features2) # shape : bx5
 
-            # Normalize each feature vector (separately)
-            features1_norm = F.normalize(features1, p=2, dim=1)
-            features2_norm = F.normalize(features2, p=2, dim=1)
-
-            # Compute loss and distances
-            loss, dist = loss_fn(features1_norm, features2_norm, target)
+            # Compute loss
+            loss = loss_fn(out, target)
             val_loss += loss.item()
 
             # Compute accuracy and predictions
-            value, preds = accuracy_fn(dist, target)
+            probs = F.softmax(out, dim=1)
+            value, preds = accuracy_fn(probs, target)
             val_acc += value
-
-            # Compute distances
-            val_distances += dist.tolist()
 
             nb_batches += 1
 
         val_loss /= nb_batches
         val_acc /= nb_batches
 
-    return val_loss, val_acc, val_distances
+    return val_loss, val_acc
 
 
 def load_checkpoint_state(model, optimizer, checkpoint_file):
@@ -107,13 +103,17 @@ def load_checkpoint_state(model, optimizer, checkpoint_file):
     return model, optimizer
 
 
-def train_model(epochs, train_data_size, batch_size, lr=0.01, margin=1.5, threshold=0.5, record=True, chkpt_delay=10):
+def train_model(epochs, batch_size, lr=0.01, record=True, chkpt_delay=10, config="baseline"):
+    if config not in ["baseline", "ii3d"]:
+        print("Config argument must be 'baseline' or 'ii3d'")
+        return
+
     if record:
         # Tensorboard writer
-        writer = SummaryWriter("runs/run_size{}_1".format(train_data_size))
+        writer = SummaryWriter("runs/run_{}_lr{}".format(config, lr))
 
     # Model
-    model = SyncI3d(num_in_frames=16)
+    model = ClassificationMLP()
     model.cuda()
 
     # Loss function, optimizer
@@ -126,14 +126,12 @@ def train_model(epochs, train_data_size, batch_size, lr=0.01, margin=1.5, thresh
     )
 
     # Accuracy function
-    accuracy_fn = Accuracy(threshold=threshold)
+    accuracy_fn = multi_class_accuracy
 
     # Datasets
-    val_data_size = train_data_size // 4
-    nb_positives_train = train_data_size // 4
-    nb_positives_val = val_data_size // 4
-    dataset_train = AvaPairs("train", nb_positives=nb_positives_train)
-    dataset_val = AvaPairs("val", nb_positives=nb_positives_val)
+    baseline = (config == "baseline")
+    dataset_train = TVHIDPairs("train", baseline=baseline)
+    dataset_val = TVHIDPairs("val", baseline=baseline)
 
     # Dataloaders
     dataloader_train = torch.utils.data.DataLoader(
@@ -158,17 +156,17 @@ def train_model(epochs, train_data_size, batch_size, lr=0.01, margin=1.5, thresh
     val_accs = []
 
     for epoch in range(epochs):
-        print("Epoch {}/{}".format(epoch + 1, epochs))
-
         # Train epoch
-        train_loss, train_acc, train_distances = train_epoch(dataloader_train, model, epoch, loss_fn, optimizer, accuracy_fn)
+        train_loss, train_acc = train_epoch(dataloader_train, model, epoch, loss_fn, optimizer, accuracy_fn)
         train_losses.append(train_loss)
         train_accs.append(train_acc)
 
         # Test epoch
-        val_loss, val_acc, val_distances = test_epoch(dataloader_val, model, epoch, loss_fn, optimizer, accuracy_fn)
+        val_loss, val_acc = test_epoch(dataloader_val, model, epoch, loss_fn, optimizer, accuracy_fn)
         val_losses.append(val_loss)
         val_accs.append(val_acc)
+
+        print("{}\t{}\t{}".format(epoch, train_loss, train_acc))
 
         if record:
             # Write losses and accuracies to Tensorboard
@@ -177,31 +175,46 @@ def train_model(epochs, train_data_size, batch_size, lr=0.01, margin=1.5, thresh
             writer.add_scalar("validation_loss", val_loss, global_step=epoch)
             writer.add_scalar("validation_accuracy", val_acc, global_step=epoch)
 
-            # Write distances to Tensorboard
-            writer.add_histogram("train_distances", np.array(train_distances), global_step=epoch)
-            writer.add_histogram("val_distances", np.array(val_distances), global_step=epoch)
-
         # Save checkpoint
-        if epoch%chkpt_delay == chkpt_delay - 1:
+        if record and epoch%chkpt_delay == chkpt_delay - 1:
             state = {
                 'epoch': epoch,
                 'model': model.state_dict(),
                 'optimizer': optimizer.state_dict()
             }
-            checkpoint_file = "checkpoints/checkpoint_size{}_lr{}_marg{}_epoch{}.pt".format(train_data_size, lr, margin, epoch)
+            checkpoint_file = "checkpoints/checkpoint_{}_lr{}_epoch{}.pt".format(config, lr, epoch)
             torch.save(state, checkpoint_file)
+        
+        if epoch == 99:
+            state = {
+                'epoch': epoch,
+                'model': model.state_dict(),
+                'optimizer': optimizer.state_dict()
+            }
+            checkpoint_file = "checkpoints/checkpoint_5layers_{}_lr{}_epoch{}.pt".format(config, lr, epoch)
+            torch.save(state, checkpoint_file)
+    
+    for i in range(10):
+        f1, f2, t = dataset_train[i]
+        f1 = f1.unsqueeze(0).cuda()
+        f2 = f2.unsqueeze(0).cuda()
+        out = model(f1, f2)
+        probs = F.softmax(out, dim=1)
+        print(out[0].tolist())
+        print([round(e, 3) for e in probs[0].tolist()], t)
+
+    return model
 
 
 if __name__ == "__main__":
     epochs = int(sys.argv[1])
     lr = float(sys.argv[2])
-    train_data_size = int(sys.argv[3])
+    config = sys.argv[3]
 
     batch_size = 8
-    record = True
-    chkpt_delay = 5
+    record = False
+    chkpt_delay = 1000
 
     print("Nb epochs : {}".format(epochs))
     print("Learning rate : {}".format(lr))
-    print("Train data size : {}".format(train_data_size))
-    train_model(epochs=epochs, train_data_size=train_data_size, batch_size=batch_size, lr=lr, record=record, chkpt_delay=chkpt_delay)
+    train_model(epochs=epochs, batch_size=batch_size, lr=lr, record=False, chkpt_delay=chkpt_delay, config=config)

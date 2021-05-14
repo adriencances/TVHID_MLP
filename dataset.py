@@ -13,17 +13,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils import data
 
-from dataset_aux import FrameProcessor
-
 
 class TVHIDPairs(data.Dataset):
-    def __init__(self, phase="train", seed=0):
+    def __init__(self, phase="train", baseline=True, seed=0):
         self.w = 224
         self.h = 224
         self.alpha = 0.1
 
         self.phase = phase
-        self.features_dir = "/home/acances/Data/TVHID/features16"
+        self.baseline = baseline
+        self.features_dir = "/home/acances/Data/TVHID/features16_{}".format("baseline" if self.baseline else "ii3d")
 
         self.gather_video_ids()
         self.gather_positive_pairs()
@@ -42,7 +41,7 @@ class TVHIDPairs(data.Dataset):
         print("Gathering positive pairs")
         self.positive_pairs = []
         features_subdirs = glob.glob("{}/positive/*".format(self.features_dir))
-        for subdir in tqdm.tqdm(features_subdirs):
+        for subdir in features_subdirs:
             video_id = subdir.split("/")[-1]
             if video_id not in self.video_ids:
                 continue
@@ -53,7 +52,7 @@ class TVHIDPairs(data.Dataset):
         print("Gathering negative pairs")
         self.negative_pairs = []
         features_subdirs = glob.glob("{}/negative/*".format(self.features_dir))
-        for subdir in tqdm.tqdm(features_subdirs):
+        for subdir in features_subdirs:
             video_id = subdir.split("/")[-1]
             if video_id not in self.video_ids:
                 continue
@@ -73,6 +72,10 @@ class TVHIDPairs(data.Dataset):
         
         with open(features_file, "rb") as f:
             tensor1, tensor2, label = pickle.load(f)
+        
+        # Set requires_grad to Falset to avoid error during the training
+        tensor1.requires_grad_(False)
+        tensor2.requires_grad_(False)
 
         return tensor1, tensor2, label
 

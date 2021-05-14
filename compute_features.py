@@ -18,7 +18,7 @@ sys.path.append("/home/acances/Code/human_interaction_SyncI3d")
 from synci3d import SyncI3d
 
 
-class TVHIDPairsHandler():
+class TVHIDPairsHandler:
     def __init__(self,
             checkpoint_file="/home/acances/Code/human_interaction_SyncI3d/checkpoints/checkpoint_size4000_lr0.01_marg1.5_epoch49.pt"):
         self.w = 224
@@ -28,7 +28,7 @@ class TVHIDPairsHandler():
         self.frames_dir = "/home/acances/Data/TVHID/keyframes"
         self.tracks_dir = "/home/acances/Data/TVHID/tracks"
         self.pairs_dir = "/home/acances/Data/TVHID/pairs16"
-        self.features_dir = "/home/acances/Data/TVHID/features16"
+        self.features_dir = "/home/acances/Data/TVHID/features16_{}".format("baseline" if checkpoint_file is None else "ii3d")
 
         self.frame_processor = FrameProcessor(self.w, self.h, self.alpha, self.frames_dir, self.tracks_dir)
 
@@ -48,9 +48,10 @@ class TVHIDPairsHandler():
         self.gather_negative_pairs()
     
     def prepare_synci3d(self):
-        checkpoint = torch.load(self.checkpoint_file)
         self.synci3d = SyncI3d(num_in_frames=16)
-        self.synci3d.load_state_dict(checkpoint["model"])
+        if self.checkpoint_file is not None:
+            checkpoint = torch.load(self.checkpoint_file)
+            self.synci3d.load_state_dict(checkpoint["model"])
 
     def gather_positive_pairs(self):
         self.positive_pairs_by_video = {}
@@ -79,7 +80,7 @@ class TVHIDPairsHandler():
                     self.negative_pairs_by_video[video_id].append(pair + [0])
     
     def get_features(self, pair):
-        video_id1, track_id1, begin1, end1, video_id2, track_id2, begin2, end2, label = pair
+        video_id1, track_id1, begin1, end1, video_id2, track_id2, begin2, end2 = pair[:8]
 
         track_id1, begin1, end1 = list(map(int, [track_id1, begin1, end1]))
         track_id2, begin2, end2 = list(map(int, [track_id2, begin2, end2]))
@@ -137,5 +138,15 @@ class TVHIDPairsHandler():
 
 
 if __name__ == "__main__":
-    handler = TVHIDPairsHandler()
+    if len(sys.argv) < 2:
+        print("Provide 'baseline' or 'ii3d' as argument")
+        sys.exit()
+    arg = sys.argv[1]
+    if arg not in ["baseline", "ii3d"]:
+        print("Provide 'baseline' or 'ii3d' as argument")
+        sys.exit()
+    if arg == "baseline":
+        handler = TVHIDPairsHandler(checkpoint_file=None)
+    elif arg == "ii3d":
+        handler = TVHIDPairsHandler()
     handler.compute_all_features()
