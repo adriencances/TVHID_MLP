@@ -31,6 +31,9 @@ def train_epoch(dataloader_train, model, epoch, loss_fn, optimizer, accuracy_fn)
     train_loss = 0
     train_acc = 0
 
+    nb_true_predictions_by_class = [0 for i in range(5)]
+    total_by_class = [0 for i in range(5)]
+
     model.train()
     for batch_id, (features1, features2, target) in enumerate(dataloader_train):
         # Pass inputs to GPU
@@ -55,18 +58,33 @@ def train_epoch(dataloader_train, model, epoch, loss_fn, optimizer, accuracy_fn)
         value, preds = accuracy_fn(probs, target)
         train_acc += value
 
+        # For accuracy by class
+        for i in range(len(target)):
+            k = target[i]
+            total_by_class[k] += 1
+            if preds[i] == target[i]:
+                nb_true_predictions_by_class[k] += 1
+
         nb_batches += 1
+    
+    # Accuracy by class
+    accuracies_by_class = [nb_true_predictions_by_class[k] / total_by_class[k] \
+        for k in range(5)]
+    train_mean_acc = sum(accuracies_by_class) / 5
 
     train_loss /= nb_batches
     train_acc /= nb_batches
 
-    return train_loss, train_acc
+    return train_loss, train_acc, train_mean_acc, accuracies_by_class
 
 
 def test_epoch(dataloader_val, model, epoch, loss_fn, optimizer, accuracy_fn):
     nb_batches = 0
     val_loss = 0
     val_acc = 0
+
+    nb_true_predictions_by_class = [0 for i in range(5)]
+    total_by_class = [0 for i in range(5)]
 
     with torch.no_grad():
         model.eval()
@@ -88,12 +106,24 @@ def test_epoch(dataloader_val, model, epoch, loss_fn, optimizer, accuracy_fn):
             value, preds = accuracy_fn(probs, target)
             val_acc += value
 
+            # For accuracy by class
+            for i in range(len(target)):
+                k = target[i]
+                total_by_class[k] += 1
+                if preds[i] == target[i]:
+                    nb_true_predictions_by_class[k] += 1
+
             nb_batches += 1
+        
+        # Accuracy by class
+        accuracies_by_class = [nb_true_predictions_by_class[k] / total_by_class[k] \
+            for k in range(5)]
+        val_mean_acc = sum(accuracies_by_class) / 5
 
         val_loss /= nb_batches
         val_acc /= nb_batches
 
-    return val_loss, val_acc
+    return val_loss, val_acc, val_mean_acc, accuracies_by_class
 
 
 def load_checkpoint_state(model, optimizer, checkpoint_file):
@@ -103,25 +133,26 @@ def load_checkpoint_state(model, optimizer, checkpoint_file):
     return model, optimizer
 
 
-def train_model(epochs, batch_size, lr=0.01, record=True, chkpt_delay=10, config="baseline"):
+def train_model(epochs, batch_size=8, lr=0.001, record=True, chkpt_delay=10, config="baseline",
+        nb_layers=2, optimizer_class=optim.Adam):
     if config not in ["baseline", "ii3d"]:
         print("Config argument must be 'baseline' or 'ii3d'")
         return
 
     if record:
         # Tensorboard writer
-        writer = SummaryWriter("runs/run_{}_lr{}".format(config, lr))
+        writer = SummaryWriter("runs/run_{}_Adam_lr{}".format(config, lr))
 
     # Model
-    model = ClassificationMLP()
+    model = ClassificationMLP(nb_layers=nb_layers)
     model.cuda()
 
     # Loss function, optimizer
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(
+    optimizer = optimizer_class(
         model.parameters(),
         lr=lr,
-        momentum=0.9,
+        # momentum=0.9,
         weight_decay=0.000001
     )
 
@@ -151,22 +182,32 @@ def train_model(epochs, batch_size, lr=0.01, record=True, chkpt_delay=10, config
 
     train_losses = []
     train_accs = []
+    train_mean_accs = []
+    all_train_accs_by_classes = []
 
     val_losses = []
     val_accs = []
+    val_mean_accs = []
+    all_val_accs_by_classes = []
 
     for epoch in range(epochs):
         # Train epoch
-        train_loss, train_acc = train_epoch(dataloader_train, model, epoch, loss_fn, optimizer, accuracy_fn)
+        train_loss, train_acc, train_mean_acc, train_accs_by_classes = train_epoch(dataloader_train, model, epoch, loss_fn, optimizer, accuracy_fn)
+        # print(train_loss, train_acc, train_mean_acc, train_accs_by_classes)
         train_losses.append(train_loss)
         train_accs.append(train_acc)
+        train_mean_accs.append(train_mean_acc)
+        all_train_accs_by_classes.append(train_accs_by_classes)
 
         # Test epoch
-        val_loss, val_acc = test_epoch(dataloader_val, model, epoch, loss_fn, optimizer, accuracy_fn)
+        val_loss, val_acc, val_mean_acc, val_accs_by_classes = test_epoch(dataloader_val, model, epoch, loss_fn, optimizer, accuracy_fn)
+        # print(val_loss, val_acc, val_mean_acc, val_accs_by_classes)
         val_losses.append(val_loss)
         val_accs.append(val_acc)
+        val_mean_accs.append(val_mean_acc)
+        all_val_accs_by_classes.append(val_accs_by_classes)
 
-        print("{}\t{}\t{}".format(epoch, train_loss, train_acc))
+        # print("{}\t{}\t{}".format(epoch, train_loss, train_acc))
 
         if record:
             # Write losses and accuracies to Tensorboard
@@ -194,27 +235,35 @@ def train_model(epochs, batch_size, lr=0.01, record=True, chkpt_delay=10, config
             checkpoint_file = "checkpoints/checkpoint_5layers_{}_lr{}_epoch{}.pt".format(config, lr, epoch)
             torch.save(state, checkpoint_file)
     
-    for i in range(10):
-        f1, f2, t = dataset_train[i]
-        f1 = f1.unsqueeze(0).cuda()
-        f2 = f2.unsqueeze(0).cuda()
-        out = model(f1, f2)
-        probs = F.softmax(out, dim=1)
-        print(out[0].tolist())
-        print([round(e, 3) for e in probs[0].tolist()], t)
+    # for i in range(10):
+    #     f1, f2, t = dataset_train[i]
+    #     f1 = f1.unsqueeze(0).cuda()
+    #     f2 = f2.unsqueeze(0).cuda()
+    #     out = model(f1, f2)
+    #     probs = F.softmax(out, dim=1)
+    #     print(out[0].tolist())
+    #     print([round(e, 3) for e in probs[0].tolist()], t)
+    
+    # state = {
+    #             'epoch': epoch,
+    #             'model': model.state_dict(),
+    #             'optimizer': optimizer.state_dict()
+    #         }
+    # checkpoint_file = "checkpoints/checkpoint_{}layers_{}_lr{}_epoch{}.pt".format(nb_layers, config, lr, epoch)
+    # torch.save(state, checkpoint_file)
 
-    return model
+    return train_losses, train_accs, train_mean_accs, all_train_accs_by_classes, val_losses, val_accs, val_mean_accs, all_val_accs_by_classes
 
 
 if __name__ == "__main__":
     epochs = int(sys.argv[1])
     lr = float(sys.argv[2])
     config = sys.argv[3]
+    nb_layers = int(sys.argv[4])
 
-    batch_size = 8
-    record = False
+    record = True
     chkpt_delay = 1000
 
     print("Nb epochs : {}".format(epochs))
     print("Learning rate : {}".format(lr))
-    train_model(epochs=epochs, batch_size=batch_size, lr=lr, record=False, chkpt_delay=chkpt_delay, config=config)
+    train_model(epochs=epochs, lr=lr, record=record, chkpt_delay=chkpt_delay, config=config, nb_layers=nb_layers)

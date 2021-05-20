@@ -1,4 +1,6 @@
 __pycache__/*
 checkpoints/*
+runs/*
+MLP_results*
 *.jpg
 *.pkl

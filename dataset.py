@@ -38,7 +38,7 @@ class TVHIDPairs(data.Dataset):
                 self.video_ids.append(video_id)
 
     def gather_positive_pairs(self):
-        print("Gathering positive pairs")
+        # print("Gathering positive pairs")
         self.positive_pairs = []
         features_subdirs = glob.glob("{}/positive/*".format(self.features_dir))
         for subdir in features_subdirs:
@@ -49,7 +49,7 @@ class TVHIDPairs(data.Dataset):
         random.shuffle(self.positive_pairs)
     
     def gather_negative_pairs(self):
-        print("Gathering negative pairs")
+        # print("Gathering negative pairs")
         self.negative_pairs = []
         features_subdirs = glob.glob("{}/negative/*".format(self.features_dir))
         for subdir in features_subdirs:
