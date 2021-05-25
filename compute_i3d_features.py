@@ -21,7 +21,7 @@ sys.path.append("/home/acances/Code/gsig_I3d/PyVideoResearch")
 from models.bases.aj_i3d import InceptionI3d as GSIG_InceptionI3d
 
 
-MODELS = [(VICKY_InceptionI3d, "/home/acances/Code/human_interaction_SyncI3d/params/rgb_imagenet.pt", "vicky-i3d"),
+MODELS = [(VICKY_InceptionI3d, "/home/acances/Code/human_interaction_SyncI3d/params/rgb_imagenet.pt", "baseline"),
           (GSIG_InceptionI3d, "/home/acances/Code/gsig_I3d/PyVideoResearch/downloaded_models/aj_rgb_imagenet.pth", "gsig-i3d")]
 
 
@@ -158,6 +158,5 @@ if __name__ == "__main__":
         print("Provide 'yes' as an argument to compute the features")
         sys.exit(1)
     
-    for MODEL in MODELS:
-        handler = TVHIDPairsHandler(MODEL=MODEL)
-        handler.compute_all_features()
+    handler = TVHIDPairsHandler(MODEL=MODELS[0])
+    handler.compute_all_features()

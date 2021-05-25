@@ -22,13 +22,13 @@ class TVHIDPairs(data.Dataset):
 
         self.phase = phase
         self.baseline = baseline
-        self.features_dir = "/home/acances/Data/TVHID/features16_{}".format("baseline" if self.baseline else "ii3d")
+        self.features_dir = "/home/acances/Data/TVHID/features16_aug_{}".format("baseline" if self.baseline else "ii3d")
 
         self.gather_video_ids()
         self.gather_positive_pairs()
         self.gather_negative_pairs()
         self.create_data()
-    
+
     def gather_video_ids(self):
         self.video_ids = []
         video_ids_file = "/home/acances/Data/TVHID/split/{}.txt".format(self.phase)
@@ -68,12 +68,15 @@ class TVHIDPairs(data.Dataset):
         "Generates one sample of data"
         nb_pairs = len(self.data)
         assert index < nb_pairs
-        features_file = self.data[index]
+        features_files = glob.glob(self.data[index] + "/*")
         
+        # Randomly choose a version of the features (data augmentation)
+        features_file = random.choice(features_files)
+        print(features_file)
         with open(features_file, "rb") as f:
             tensor1, tensor2, label = pickle.load(f)
-        
-        # Set requires_grad to False to avoid error during the training
+
+        # Set requires_grad to Falset to avoid error during the training
         tensor1.requires_grad_(False)
         tensor2.requires_grad_(False)
 

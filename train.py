@@ -16,7 +16,8 @@ from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
 
 from dataset_aux import FrameProcessor
-from dataset import TVHIDPairs
+# from dataset import TVHIDPairs
+from dataset_augmented import TVHIDPairs
 from MLP import ClassificationMLP
 from accuracy import multi_class_accuracy
 
