@@ -15,13 +15,14 @@ from torch.utils import data
 
 
 class TVHIDPairs(data.Dataset):
-    def __init__(self, phase="train", baseline=True, seed=0):
+    def __init__(self, phase="train", baseline=True, augmented=True, seed=0):
         self.w = 224
         self.h = 224
         self.alpha = 0.1
 
         self.phase = phase
         self.baseline = baseline
+        self.augmented = augmented
         self.features_dir = "/home/acances/Data/TVHID/features16_aug_{}".format("baseline" if self.baseline else "ii3d")
 
         self.gather_video_ids()
@@ -68,11 +69,10 @@ class TVHIDPairs(data.Dataset):
         "Generates one sample of data"
         nb_pairs = len(self.data)
         assert index < nb_pairs
-        features_files = glob.glob(self.data[index] + "/*")
+        features_files = sorted(glob.glob(self.data[index] + "/*"))
         
         # Randomly choose a version of the features (data augmentation)
-        features_file = random.choice(features_files)
-        print(features_file)
+        features_file = random.choice(features_files) if self.augmented else features_files[0]
         with open(features_file, "rb") as f:
             tensor1, tensor2, label = pickle.load(f)
 
